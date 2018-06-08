@@ -1,4 +1,4 @@
-import logging
+import logging,asyncio,aiomysql
 class Model(dict,metaclass=ModelMetaClass):
     pass
 class ModelMetaClass(type):
@@ -10,7 +10,27 @@ class ModelMetaClass(type):
         mapping = dict()
         fields = []
         key = None
-
+        for k,v in attrs.items:
+            if isinstance(v,Field):
+                logging.info('founding mapping %s->%s',(k,v))
+                mapping[k] = v
+                if v.key:
+                    if key:
+                        raise BaseException('Duplicate primary key for field: %s' % k)
+                    key = v.key
+                else:
+                    fields.append(k)
+        if not key:
+            raise BaseException('Primary key not found')
+        for k in mapping.keys():
+            attrs.pop(k)
+        escapedFields = list(map(lambda f:'`%s`' % f,fields))
+        attrs['mapping'] = mapping
+        attrs['table'] = tableName
+        attrs['key'] = key
+        attrs['fields'] = fields
+        attrs['select'] = 'select %s,%s from %s' %(key,','.join(escapedFields),tableName)
+        attrs['insert'] = 'insert'
 class Field(object):
     def __init__(self,name,type,key,default):
         self.name = name
