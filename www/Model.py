@@ -7,6 +7,22 @@ class Model(dict,metaclass=ModelMetaClass):
             return self[item]
         except KeyError:
             raise AttributeError(r'Model object hash no key:%s' % item)
+    def __setattr__(self, key, value):
+        self[key] = value
+    def getValue(self,key):
+        return getattr(self,key,None)
+    def getValueorDefault(self,key,):
+        value = getattr(self,key,None)
+        if value is None:
+            field = self.mapping[key]
+            if field.default is not None:
+                value = field.default if callable(field.default) else field.default
+                logging.debug('useing default value %s,%s' %(key,str(value)))
+                setattr(self,key,value)
+        return value
+    @classmethod
+    async def getAll(cls,where=None,args=None,**kw):
+        pass
 class ModelMetaClass(type):
     def __new__(cls, name,bases,attrs):
         if name=='Model':
