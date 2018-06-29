@@ -182,6 +182,6 @@ class DoubleField(Field):
     def __init__(self,name=None,type='decimal(15,4)',key=False,default=0.0):
         super.__init__(name,type,key,default)
 class TextField(Field):
-    def __init__(self,name=None,type='text(100)',key=False,deault=None):
+    def __init__(self,name=None,type='text',key=False,deault=None):
         super.__init__(name,type,key,deault)
 
