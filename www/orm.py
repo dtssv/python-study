@@ -1,5 +1,4 @@
 import aiomysql,logging,configparser,asyncio
-@asyncio.coroutine
 def createPool(loop):
     logging.info('create connection pool....')
     config = configparser.ConfigParser()
@@ -11,7 +10,8 @@ def createPool(loop):
         user = config.get('database','user'),
         password = config.get('database','password'),
         db = config.get('database','database'),
-        autocommit = config.get('database','autocommit')
+        autocommit = config.get('database','autocommit'),
+        loop=loop
     )
 async def select(sql,args,size=None):
     logging.info(sql,args)
