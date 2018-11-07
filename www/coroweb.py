@@ -1,7 +1,9 @@
-import asyncio,inspect,os,logging,functools
+import asyncio, inspect, os, logging, functools
 from urllib import parse
 from aiohttp import web
 from www.apis import *
+
+
 def get(path):
     '''
      Define decorator @get('/path')
@@ -19,6 +21,7 @@ def get(path):
 
     return decorator
 
+
 def post(path):
     '''
     Define decorator @post('/path')
@@ -35,6 +38,7 @@ def post(path):
 
     return decorator
 
+
 def get_required_kw_args(fn):
     args = []
     params = inspect.signature(fn).parameters
@@ -42,6 +46,7 @@ def get_required_kw_args(fn):
         if param.kind == inspect.Parameter.KEYWORD_ONLY and param.default == inspect.Parameter.empty:
             args.append(name)
     return tuple(args)
+
 
 def get_named_kw_args(fn):
     args = []
@@ -51,17 +56,20 @@ def get_named_kw_args(fn):
             args.append(name)
     return tuple(args)
 
+
 def has_named_kw_args(fn):
     params = inspect.signature(fn).parameters
     for name, param in params.items():
         if param.kind == inspect.Parameter.KEYWORD_ONLY:
             return True
 
+
 def has_var_kw_arg(fn):
     params = inspect.signature(fn).parameters
     for name, param in params.items():
         if param.kind == inspect.Parameter.VAR_KEYWORD:
             return True
+
 
 def has_request_arg(fn):
     sig = inspect.signature(fn)
@@ -76,6 +84,7 @@ def has_request_arg(fn):
             raise ValueError(
                 'request parameter must be the last named parameter in function: %s%s' % (fn.__name__, str(sig)))
     return found
+
 
 class RequestHandler(object):
 
@@ -140,10 +149,12 @@ class RequestHandler(object):
         except APIError as e:
             return dict(error=e.error, data=e.data, message=e.message)
 
+
 def add_static(app):
     path = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'static')
     app.router.add_static('/static/', path)
     logging.info('add static %s => %s' % ('/static/', path))
+
 
 def add_route(app, fn):
     method = getattr(fn, '__method__', None)
@@ -155,6 +166,7 @@ def add_route(app, fn):
     logging.info('add route %s %s => %s(%s)' % (
     method, path, fn.__name__, ', '.join(inspect.signature(fn).parameters.keys())))
     app.router.add_route(method, path, RequestHandler(app, fn))
+
 
 def add_routes(app, module_name):
     n = module_name.rfind('.')
