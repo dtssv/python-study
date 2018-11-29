@@ -14,7 +14,7 @@ class User(Model):
     admin = BooleanField(default=False)
     name = StringField(type='varchar(10)')
     image = StringField(type='vaarchar(500)')
-    createTime = DoubleField(default=time.time)
+    createTime = FloatField(default=time.time())
 
 
 class Blog(Model):
@@ -26,7 +26,7 @@ class Blog(Model):
     name = StringField(type='varchar(50)')
     summary = StringField(type='varchar(200)')
     content = TextField()
-    createTime = DoubleField(default=time.time)
+    createTime = FloatField(default=time.time())
 
 
 class Comment(Model):
@@ -37,4 +37,4 @@ class Comment(Model):
     userName = StringField(type='varchar(50)')
     userImage = StringField(type='varchar(500)')
     content = TextField()
-    createTime = DoubleField(default=time.time)
+    createTime = FloatField(default=time.time())

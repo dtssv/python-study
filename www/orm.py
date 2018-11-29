@@ -4,7 +4,7 @@ import aiomysql, logging, configparser, asyncio
 async def createPool(loop):
     logging.info('create connection pool....')
     config = configparser.ConfigParser()
-    config.read('../conf/application.ini')
+    config.read('./conf/application.ini')
     global __pool
     __pool = await aiomysql.create_pool(
         host=config.get('database', 'host'),
@@ -33,7 +33,7 @@ async def select(sql,args,size=None):
             return rs
 
 
-async def execute(sql,args,autocommit=True):
+async def execute(sql,args,autocommit=False):
     logging.info('SQL:%s' % sql)
     global __pool
     async with __pool.get() as conn:
@@ -43,10 +43,12 @@ async def execute(sql,args,autocommit=True):
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(sql.replace('?', '%s'), args)
                 affected = cur.rowcount
+                await cur.close()
                 if not autocommit:
-                    conn.commit()
+                    await conn.commit()
         except BaseException as e:
-            conn.rollBack()
+            if not autocommit:
+                await conn.rollback()
             raise
         return affected
 
@@ -80,8 +82,8 @@ class ModelMetaClass(type):
         attrs['key'] = key
         attrs['tableName'] = tableName
         attrs['select'] = 'select %s,%s from %s' %(key,', '.join(fields),tableName)
-        attrs['insert'] = 'insert into %s (%s,%s) values (%s)' %(tableName,key, ', '.join(escapeFields),createArgsString(len(escapeFields)+1))
-        attrs['update'] = 'update %s set %s where %s=?' %(tableName,', '.join(map(lambda f:'`%s`=?' % mapping.get(f).name or f,fields)),key)
+        attrs['insert'] = 'insert into %s (%s,%s) values (%s)' %(tableName, ', '.join(escapeFields), key, createArgsString(len(escapeFields)+1))
+        attrs['update'] = 'update %s set %s where %s=?' %(tableName,', '.join(map(lambda f:'`%s`=?' % mapping.get(f).name or f, fields)), key)
         attrs['delete'] = 'delete from %s where %s=?' %(tableName,key)
         return type.__new__(cls,name,bases,attrs)
 
@@ -89,7 +91,6 @@ class ModelMetaClass(type):
 class Model(dict, metaclass=ModelMetaClass):
     def __init__(self, **kw):
         super(Model,self).__init__(**kw)
-
 
     def __getattr__(self, item):
         try:
@@ -108,7 +109,7 @@ class Model(dict, metaclass=ModelMetaClass):
         if value is None:
             field = self.mapping[key]
             if field.default is not None:
-                value = field.default if callable(field.default) else field.default
+                value = field.default() if callable(field.default) else field.default
                 logging.debug('useing default value %s,%s' %(key,str(value)))
                 setattr(self,key,value)
         return value
@@ -158,7 +159,7 @@ class Model(dict, metaclass=ModelMetaClass):
         rs = await select('%s where %s=?' %(cls.select,cls.key),[key],1)
         if len(rs) == 0:
             return None
-        return cls(**rs)
+        return cls(**rs[0])
 
     async def save(self):
         args = list(map(self.getValueorDefault,self.fields))
@@ -220,6 +221,10 @@ class DoubleField(Field):
 
 
 class TextField(Field):
-    def __init__(self,name=None,type='text',key=False,deault=None):
-        super().__init__(name,type,key,deault)
+    def __init__(self,name=None,type='text',key=False,default=None):
+        super().__init__(name,type,key,default)
 
+
+class FloatField(Field):
+    def __init__(self,name=None,type='real',key=False,default=0.0):
+        super().__init__(name,type,key,default)

@@ -6,12 +6,13 @@ from aiohttp import web
 from jinja2 import Environment,FileSystemLoader
 import www.orm
 from www.coroweb import add_routes,add_static
+from www.handles import *
 
 
 def init_jinja2(app,**kw):
     logging.info('init jinja2...')
     config = configparser.ConfigParser()
-    config.read('../conf/application.ini')
+    config.read('./conf/application.ini')
     option = dict(
         autoescape=config.getboolean('jinja2','autoe_space'),
         block_start_string=config.get('jinja2','block_start_string'),
@@ -35,8 +36,24 @@ def init_jinja2(app,**kw):
 async def loggerFactory(app,handler):
     async def logger(request):
         logging.info('request:%s,%s' % (request.method, request.path))
-        return await(handler(request))
+        return await handler(request)
     return logger
+
+
+async def authFactory(app,handler):
+    async def auth(request):
+        logging.info('check user:%s %s' %(request.method, request.path))
+        request.__user__ = None
+        cookieStr = request.cookies.get(COOKIE_NAME)
+        if cookieStr:
+            user = await cookie2User(cookieStr)
+            if user:
+                logging.info('set current user: %s' % user.email)
+                request.__user__ = user
+        if request.path.startswith('/manage') and (request.__user__ is None or not request.__user__.admin):
+            return web.HTTPFound('/signin')
+        return await handler(request)
+    return auth
 
 
 async def dataFactory(app,handler):
@@ -46,9 +63,9 @@ async def dataFactory(app,handler):
                 request.__data__ = await request.json()
                 logging.info('request json:%s' % str(request.__data__))
             elif request.content_type.startswith('application/x-www-form-urlencoded'):
-                request.__data__ = await  request.post()
+                request.__data__ = await request.post()
                 logging.info('request form:%s' % str(request.__data__))
-            return (await handler(request))
+            return await handler(request)
     return parseData
 
 
@@ -56,7 +73,7 @@ async def responseFactory(app, handler):
     async def response(request):
         logging.info('response handler...')
         r = await handler(request)
-        if isinstance(r, web.WebSocketResponse):
+        if isinstance(r, web.StreamResponse):
             return r
         if isinstance(r, bytes):
             resp = web.Response(body=r)
@@ -71,10 +88,11 @@ async def responseFactory(app, handler):
         if isinstance(r, dict):
             template = r.get('__template__')
             if template is None:
-                resp = web.Response(body=json.dumps(r,ensure_ascii=False, default=lambda o: o.__dict__).encode('UTF-8'))
+                resp = web.Response(body=json.dumps(r, ensure_ascii=False, default=lambda o: o.__dict__).encode('UTF-8'))
                 resp.content_type = 'application/json;charset=utf-8'
                 return resp
             else:
+                r['__user__'] = request.__user__
                 resp = web.Response(body=app['__templating__'].get_template(template).render(**r).encode('utf-8'))
                 resp.content_type = 'text/html;charset=utf-8'
                 return resp
@@ -85,7 +103,7 @@ async def responseFactory(app, handler):
             if isinstance(t,int) and r > 100 and r < 600:
                 return web.Response(t, str(m))
         resp = web.Response(body=str(r).encode('utf-8'))
-        resp.content_type='text/plain;charset=utf-8'
+        resp.content_type = 'text/plain;charset=utf-8'
         return resp
     return response
 
@@ -104,20 +122,18 @@ def datetimeFilter(t):
     return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
 
 
-def test(request):
-    return web.Response(body='<h1>HELLO</h1>')
-
-
 async def init(loop):
     logging.info("start server")
     await www.orm.createPool(loop=loop)
-    app = web.Application(loop=loop,middlewares=[loggerFactory, responseFactory])
-    init_jinja2(app,filter=dict(datetime=datetimeFilter))
-    add_routes(app,'handles')
+    app = web.Application(loop=loop, middlewares=[loggerFactory, authFactory, responseFactory])
+    init_jinja2(app, filter=dict(datetime=datetimeFilter))
+    add_routes(app, 'handles')
     add_static(app)
     srv = await loop.create_server(app.make_handler(), '127.0.0.1', 8888)
     logging.info('server started at http://127.0.0.1:8888...')
     return srv
+
+
 loop = asyncio.get_event_loop()
 loop.run_until_complete(init(loop))
 loop.run_forever()
