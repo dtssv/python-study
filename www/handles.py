@@ -3,7 +3,6 @@ from www.coroweb import get,post
 from www.models import User,Blog,Comment,nextId
 from www.apis import *
 from aiohttp import web
-from www.markdown2 import *
 
 COOKIE_NAME = 'webapp'
 _COOKIE_KEY = 'Webapp'
@@ -87,7 +86,6 @@ async def getBlog(id):
     comments = await Comment.findAll('blog_id=?', [id], orderBy='create_time desc')
     for c in comments:
         c.htmlContent = text2Html(c.content)
-    blog.htmlContent = markdown(blog.content)
     return {
         '__template__': 'blog.html',
         'blog': blog,
@@ -120,11 +118,9 @@ def authenticate(*, email, password):
     if len(users) == 0:
         raise APIValueError('email', 'Email not exist')
     user = users[0]
-    sha1 = hashlib.sha1
-    sha1.update(user.id.encode('utf-8'))
-    sha1.update(b':')
-    sha1.update(password.encode('utf-8'))
-    if user.password != sha1.hexdigest():
+    sha1Password = '%s:%s' % (user.id, password)
+    sha1 = hashlib.sha1(sha1Password.encode('utf-8')).hexdigest()
+    if user.password != sha1:
         raise APIValueError('password', 'Invalid password')
     r = web.Response()
     r.set_cookie(COOKIE_NAME, user2Cookie(user, 86400), max_age=86400, httponly=True)

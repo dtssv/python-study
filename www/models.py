@@ -13,7 +13,7 @@ class User(Model):
     password = StringField(type='varchar(32)')
     admin = BooleanField(default=False)
     name = StringField(type='varchar(10)')
-    image = StringField(type='vaarchar(500)')
+    image = StringField(type='varchar(500)')
     createTime = FloatField(default=time.time())
 
 
