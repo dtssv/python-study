@@ -66,5 +66,5 @@ if __name__ == '__main__':
         argv.insert(0, 'python3')
     command = argv
     path = os.path.abspath('.')
-    startProcess(path, None)
+    startWatch(path, None)
 
