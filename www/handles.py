@@ -60,6 +60,7 @@ def cookie2User(cookieStr):
             logging.info('invalid sha1')
             return None
         user.password = '******'
+        return user
     except Exception as e:
         logging.exception(e)
         return None
@@ -81,9 +82,9 @@ def index(request):
 
 
 @get('/blog/{id}')
-async def getBlog(id):
-    blog = await Blog.find(id)
-    comments = await Comment.findAll('blog_id=?', [id], orderBy='create_time desc')
+def getBlog(id):
+    blog = yield from Blog.find(id)
+    comments = yield from Comment.findAll('blog_id=?', [id], orderBy='create_time desc')
     for c in comments:
         c.htmlContent = text2Html(c.content)
     return {
@@ -118,6 +119,7 @@ def authenticate(*, email, password):
     if len(users) == 0:
         raise APIValueError('email', 'Email not exist')
     user = users[0]
+
     sha1Password = '%s:%s' % (user.id, password)
     sha1 = hashlib.sha1(sha1Password.encode('utf-8')).hexdigest()
     if user.password != sha1:
@@ -139,6 +141,26 @@ def signout(request):
     return r
 
 
+@get('/manage/')
+def manage():
+    return 'redirect:/manage/comments'
+
+@get('/manage/comments')
+def manageComments(*, page='1'):
+    return{
+        '__template__': 'manage_comments.html',
+        'page_index': getPageIndex(page)
+    }
+
+
+@get('/manage/blogs')
+def manageBlogs(*, page='1'):
+    return {
+        '__template__': 'manage_blogs.html',
+        'page_index': getPageIndex(page)
+    }
+
+
 @get('/manage/blogs/create')
 def manageCreateBlog():
     return {
@@ -148,12 +170,66 @@ def manageCreateBlog():
     }
 
 
+@get('/manage/blogs/edit/{id}')
+def manageEditBlog(*, id):
+    return {
+        '__template__': 'manage_blog_edit.html',
+        'id': id,
+        'action': '/api/blogs/%s' % id
+    }
+
+
+@get('/manage/users')
+def manageUsers(*, page='1'):
+    return {
+        '__template__': 'manage_users.html',
+        'page_index': getPageIndex(page)
+    }
+
+
+@get('/api/comments')
+def apiComments(*, page='1'):
+    pageIndex = getPageIndex(page)
+    num = yield from Comment.findNumber('count(id)')
+    p = Page(num,pageIndex)
+    if num ==0:
+        return dict(page=p, comments=())
+    comments = yield from  Comment.findAll(orderBy= 'createTime desc', limit=(p.offset, p.limit))
+    return dict(page=p, comments=comments)
+
+
+@post('/api/blogs/{id}/comments')
+def apiCreateComment(id, request, *, content):
+    user = request.__user__
+    if user is None:
+        raise APIPermissionError('请先登录')
+    if not content or not content.strip():
+        raise APIValueError('内容为空')
+    blog = yield from Blog.find(id)
+    if blog is None:
+        raise APIResourceNotFoundError('文章不存在')
+    comment = Comment(blogId=blog.id, userId=user.id, userName=user.name, userImage=user.image, content=content.strip())
+    yield from Comment.save(comment)
+    return content
+
+
+@post('/api/comments/{id}/delete')
+def apiCommentDelete(id, request):
+    checkAdmin(request)
+    c = yield from Comment.find(id)
+    if c is None:
+        raise APIResourceNotFoundError('评论不存在')
+    yield from c.remove()
+    return dict(id=id)
+
+
 _RE_EMAIL = re.compile(r'^[a-z0-9\.\-\_]+\@[a-z0-9\-\_]+(\.[a-z0-9\-\_]+){1,4}$')
+
+
 _RE_SHA1 = re.compile(r'^[0-9a-f]{40}$')
 
 
 @post('/api/users')
-@asyncio.coroutine
 def registerUser(*, email, name, password):
     if not name or not name.strip():
         raise APIValueError('name')
@@ -177,14 +253,38 @@ def registerUser(*, email, name, password):
     return r
 
 
-@get('/api/blogs/{id}')
-async def getBlog(id):
-    blog = await Blog.find(id)
-    return blog
+@get('/api/users')
+def apiGetUsers(*, page='1'):
+    pageIndex = getPageIndex(page)
+    num = yield from User.findNumber('count(id)')
+    p = Page(num, pageIndex)
+    if num == 0:
+        return dict(page=p, users=())
+    users = yield from User.findAll(orderBy='createTime desc', limit=(p.offset, p.limit))
+    for u in users:
+        u.password = '******'
+    return dict(page=p, users=users)
 
 
 @get('/api/blogs')
-async def apiCreateBlog(request, *, name, summary, content):
+def apiBlogs(*, page=1):
+    page_index = getPageIndex(page)
+    num = yield from Blog.findNumber('count(id)')
+    p = Page(num, page_index)
+    if num == 0:
+        return dict(page = p, blogs = ())
+    blogs = yield from  Blog.findAll(orderBy='createTime desc', limit=(p.offset, p.limit))
+    return dict(page = p, blogs = blogs)
+
+
+@get('/api/blogs/{id}')
+def getBlog(id):
+    blog = yield from Blog.find(id)
+    return blog
+
+
+@post('/api/blogs')
+def apiCreateBlog(request, *, name, summary, content):
     checkAdmin(request)
     if not name or not name.strip():
         raise APIValueError('name', 'name cannot be empty')
@@ -193,6 +293,44 @@ async def apiCreateBlog(request, *, name, summary, content):
     if not content or not content.strip():
         raise APIValueError('content', 'content cannot be empty')
     blog = Blog(userId=request.__user__.id, userName=request.__user__.name, userImage=request.__user__.image, name=name.strip(), summary=summary.strip(), content=content.strip())
-    await blog.save()
+    yield from blog.save()
     return blog
+
+
+@post('/api/blogs/{id}')
+def apiUpdateBlog(id, request, *, name, summary, content):
+    checkAdmin(request)
+    blog = yield from Blog.find(id)
+    if not name or not name.strip():
+        raise APIValueError('文章标题', '文章标题不能为空')
+    if not summary or not summary.strip():
+        raise APIValueError('文章概要', '文章概要不能为空')
+    if not content or not content.strip():
+        raise APIValueError('文章内容', '文章内容不能为空')
+    blog.name = name.strip()
+    blog.summary = summary.strip()
+    blog.content = content.strip()
+    yield from blog.merge()
+    return blog
+
+
+@post('/api/blogs/{id}/delete')
+def apiDeleteBlog(request, *, id):
+    checkAdmin(request)
+    blog = yield from Blog.find(id)
+    yield from blog.remove()
+    return dict(id=id)
+
+
+@get('/blog/{id}')
+def getBlog(id):
+    blog = yield from Blog.find(id)
+    comments = yield from Comment.findAll('blogId=?', [id], orderBy='createTime desc')
+    for c in comments:
+        c.htmlContent = text2Html(c.content)
+    return {
+        '__template__': 'blog.html',
+        'blog': blog,
+        'comments': comments
+    }
 

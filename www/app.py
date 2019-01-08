@@ -33,46 +33,54 @@ def init_jinja2(app,**kw):
     app['__templating__'] = env
 
 
-async def loggerFactory(app,handler):
-    async def logger(request):
+@asyncio.coroutine
+def loggerFactory(app,handler):
+    @asyncio.coroutine
+    def logger(request):
         logging.info('request:%s,%s' % (request.method, request.path))
-        return await handler(request)
+        return (yield from handler(request))
     return logger
 
 
-async def authFactory(app,handler):
-    async def auth(request):
+@asyncio.coroutine
+def authFactory(app,handler):
+    @asyncio.coroutine
+    def auth(request):
         logging.info('check user:%s %s' %(request.method, request.path))
         request.__user__ = None
         cookieStr = request.cookies.get(COOKIE_NAME)
         if cookieStr:
-            user = await cookie2User(cookieStr)
+            user = yield from cookie2User(cookieStr)
             if user:
                 logging.info('set current user: %s' % user.email)
                 request.__user__ = user
         if request.path.startswith('/manage') and (request.__user__ is None or not request.__user__.admin):
             return web.HTTPFound('/signin')
-        return await handler(request)
+        return (yield from handler(request))
     return auth
 
 
-async def dataFactory(app,handler):
-    async def parseData(request):
+@asyncio.coroutine
+def dataFactory(app,handler):
+    @asyncio.coroutine
+    def parseData(request):
         if request.method == 'POST':
             if request.content_type.startswith('application/json'):
-                request.__data__ = await request.json()
+                request.__data__ = yield from request.json()
                 logging.info('request json:%s' % str(request.__data__))
             elif request.content_type.startswith('application/x-www-form-urlencoded'):
-                request.__data__ = await request.post()
+                request.__data__ = yield from request.post()
                 logging.info('request form:%s' % str(request.__data__))
-            return await handler(request)
+            return (yield from handler(request))
     return parseData
 
 
-async def responseFactory(app, handler):
-    async def response(request):
+@asyncio.coroutine
+def responseFactory(app, handler):
+    @asyncio.coroutine
+    def response(request):
         logging.info('response handler...')
-        r = await handler(request)
+        r = yield from handler(request)
         if isinstance(r, web.StreamResponse):
             return r
         if isinstance(r, bytes):
@@ -81,7 +89,7 @@ async def responseFactory(app, handler):
             return resp
         if isinstance(r, str):
             if r.startswith('redirect:'):
-                return web.HTTPFound(r[:9])
+                return web.HTTPFound(r[9:])
             resp = web.Response(body=r.encode('UTF-8'))
             resp.content_type = 'text/html;charset=utf-8'
             return resp
@@ -122,14 +130,15 @@ def datetimeFilter(t):
     return u'%s年%s月%s日' % (dt.year, dt.month, dt.day)
 
 
-async def init(loop):
+@asyncio.coroutine
+def init(loop):
     logging.info("start server")
-    await www.orm.createPool(loop=loop)
+    yield from www.orm.createPool(loop=loop)
     app = web.Application(loop=loop, middlewares=[loggerFactory, authFactory, responseFactory])
     init_jinja2(app, filter=dict(datetime=datetimeFilter))
     add_routes(app, 'handles')
     add_static(app)
-    srv = await loop.create_server(app.make_handler(), '127.0.0.1', 8888)
+    srv = yield from loop.create_server(app.make_handler(), '127.0.0.1', 8888)
     logging.info('server started at http://127.0.0.1:8888...')
     return srv
 

@@ -1,12 +1,13 @@
 import aiomysql, logging, configparser, asyncio
 
 
-async def createPool(loop):
+@asyncio.coroutine
+def createPool(loop):
     logging.info('create connection pool....')
     config = configparser.ConfigParser()
     config.read('./conf/application.ini')
     global __pool
-    __pool = await aiomysql.create_pool(
+    __pool = yield from aiomysql.create_pool(
         host=config.get('database', 'host'),
         port=config.getint('database', 'port'),
         user=config.get('database', 'user'),
@@ -19,36 +20,38 @@ async def createPool(loop):
     )
 
 
-async def select(sql,args,size=None):
+@asyncio.coroutine
+def select(sql, args, size=None):
     logging.info('SQL:%s' % sql)
     global __pool
-    async with __pool.get() as conn:
-        async with conn.cursor(aiomysql.DictCursor) as cur:
-            await cur.execute(sql.replace('?','%s'),args or ())
-            if size:
-                rs = await cur.fetchmany(size)
-            else:
-                rs = await cur.fetchall()
-            await cur.close()
-            return rs
+    with (yield from __pool) as conn:
+        cur = yield from conn.cursor(aiomysql.DictCursor)
+        yield from cur.execute(sql.replace('?','%s'),args or ())
+        if size:
+            rs = yield from cur.fetchmany(size)
+        else:
+            rs = yield from cur.fetchall()
+        yield from cur.close()
+        return rs
 
 
-async def execute(sql,args,autocommit=False):
+@asyncio.coroutine
+def execute(sql, args, autocommit=False):
     logging.info('SQL:%s' % sql)
     global __pool
-    async with __pool.get() as conn:
+    with (yield from __pool) as conn:
         if not autocommit:
-            conn.begin()
+            yield from conn.begin()
         try:
-            async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(sql.replace('?', '%s'), args)
-                affected = cur.rowcount
-                await cur.close()
-                if not autocommit:
-                    await conn.commit()
+            cur = yield from conn.cursor(aiomysql.DictCursor)
+            yield from cur.execute(sql.replace('?', '%s'), args)
+            affected = cur.rowcount
+            yield from cur.close()
+            if not autocommit:
+                yield from conn.commit()
         except BaseException as e:
             if not autocommit:
-                await conn.rollback()
+                yield from conn.rollback()
             raise
         return affected
 
@@ -83,9 +86,9 @@ class ModelMetaClass(type):
         attrs['tableName'] = tableName
         attrs['select'] = 'select %s,%s from %s' %(key,', '.join(fields),tableName)
         attrs['insert'] = 'insert into %s (%s,%s) values (%s)' %(tableName, ', '.join(escapeFields), key, createArgsString(len(escapeFields)+1))
-        attrs['update'] = 'update %s set %s where %s=?' %(tableName,', '.join(map(lambda f:'`%s`=?' % mapping.get(f).name or f, fields)), key)
-        attrs['delete'] = 'delete from %s where %s=?' %(tableName,key)
-        return type.__new__(cls,name,bases,attrs)
+        attrs['update'] = 'update %s set %s where %s=?' % (tableName, ', '.join(map(lambda f: '`%s`=?' % (mapping.get(f).name or f), fields)), key)
+        attrs['delete'] = 'delete from %s where %s=?' % (tableName, key)
+        return type.__new__(cls, name, bases, attrs)
 
 
 class Model(dict, metaclass=ModelMetaClass):
@@ -115,7 +118,8 @@ class Model(dict, metaclass=ModelMetaClass):
         return value
 
     @classmethod
-    async def findAll(cls,where=None,args=None,**kw):
+    @asyncio.coroutine
+    def findAll(cls,where=None,args=None,**kw):
         'find objects by where clause'
         sql = [cls.select]
         if where:
@@ -132,52 +136,57 @@ class Model(dict, metaclass=ModelMetaClass):
             sql.append('limit')
             if isinstance(limit,int):
                 sql.append('?')
-                sql.append(limit)
+                args.append(limit)
             elif isinstance(limit,tuple) and len(limit)==2:
                 sql.append('?,?')
-                sql.append(limit)
+                args.extend(limit)
             else:
                 raise ValueError('Invalid limit value %s' % str(limit))
-        rs = await select(' '.join(sql),args)
+        rs = yield from select(' '.join(sql),args)
         return [cls(**r) for r in rs]
 
     @classmethod
-    async def findNumber(cls,selectField,where=None,args=None):
+    @asyncio.coroutine
+    def findNumber(cls,selectField,where=None,args=None):
         'find number by where clause'
         sql = ['select %s num from %s' %(selectField,cls.__table__)]
         if where:
             sql.append('where')
             sql.append(where)
-        rs = await select(' '.join(sql),args,1)
+        rs = yield from select(' '.join(sql),args,1)
         if len(rs) == 0:
             return None
         return rs[0]['num']
 
     @classmethod
-    async def find(cls,key):
+    @asyncio.coroutine
+    def find(cls,key):
         'find by key'
-        rs = await select('%s where %s=?' %(cls.select,cls.key),[key],1)
+        rs = yield from select('%s where %s=?' %(cls.select,cls.key),[key],1)
         if len(rs) == 0:
             return None
         return cls(**rs[0])
 
-    async def save(self):
+    @asyncio.coroutine
+    def save(self):
         args = list(map(self.getValueorDefault,self.fields))
         args.append(self.getValueorDefault(self.key))
-        result = await execute(self.insert,args)
+        result = yield from execute(self.insert,args)
         if result!=1:
             logging.warn('failed to insert record')
 
-    async def update(self):
+    @asyncio.coroutine
+    def merge(self):
         args = list(map(self.getValue,self.fields))
         args.append(self.getValue(self.key))
-        result = await execute(self.update,args)
+        result = yield from execute(self.update,args)
         if result!=1:
             logging.warn('failed to update record by key')
 
-    async def remove(self):
+    @asyncio.coroutine
+    def remove(self):
         args = [self.getValue(self.key)]
-        result = await execute(self.delete,args)
+        result = yield from execute(self.delete,args)
         if result!=1:
             logging.warn('failed to delete by key')
 
